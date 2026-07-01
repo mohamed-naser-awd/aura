@@ -1,3 +1,11 @@
+/// Formats a running call timer as `M:SS` (and `H:MM:SS` once past an hour).
+String formatCallClock(Duration d) {
+  final h = d.inHours;
+  final m = (d.inMinutes % 60).toString().padLeft(h > 0 ? 2 : 1, '0');
+  final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+  return h > 0 ? '$h:$m:$s' : '$m:$s';
+}
+
 /// Formats a call duration: `Ns` under a minute, `m:ss` above.
 String formatCallDuration(Duration d) {
   final secs = d.inSeconds;

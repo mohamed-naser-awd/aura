@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_contacts/flutter_contacts.dart' hide Group;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
@@ -193,11 +194,21 @@ void _showCallMenu(BuildContext context, WidgetRef ref, CallEvent call, String? 
             title: const Text('View contact'),
             onTap: () {
               Navigator.pop(sheet);
-              Navigator.of(context).push(
+              Navigator.of(context, rootNavigator: true).push(
                 MaterialPageRoute(builder: (_) => ContactDetailScreen(number: number)),
               );
             },
           ),
+          if (name == null)
+            ListTile(
+              leading: const Icon(Icons.person_add),
+              title: const Text('Add to contacts'),
+              onTap: () async {
+                Navigator.pop(sheet);
+                await FlutterContacts.openExternalInsert(Contact()..phones = [Phone(number)]);
+                ref.invalidate(contactsProvider);
+              },
+            ),
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('Details'),
@@ -245,11 +256,19 @@ class _CallDetailsDialog extends StatelessWidget {
         ? call.endTs!.difference(call.connectedTs!)
         : null;
 
+    // Who hung up (only meaningful for a connected call): local = You, remote = They.
+    final endedBy = switch (DisconnectKind.fromAndroidCode(call.disconnectCode)) {
+      DisconnectKind.local => 'You',
+      DisconnectKind.remote => 'They',
+      _ => null,
+    };
+
     final rows = <(String, String)>[
       if (name != null) ('Name', name!),
       ('Number', call.number),
       ('Direction', call.direction == 'outgoing' ? 'Outgoing' : 'Incoming'),
       ('Result', disp.label),
+      if (endedBy != null) ('Ended by', endedBy),
       ('When', DateFormat.yMMMd().add_jm().format(call.startTs)),
       ('Rang', ring != null ? formatCallDuration(ring) : '—'),
       ('Talk', talk != null ? formatCallDuration(talk) : '—'),

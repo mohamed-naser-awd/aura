@@ -74,6 +74,8 @@ object CallEventChannel {
         "number" to call.details?.handle?.schemeSpecificPart,
         "state" to call.state,
         "name" to callerName(call),
+        // Epoch ms the call connected (0 until connected) — drives the live in-call timer.
+        "connectTimeMillis" to call.details?.connectTimeMillis,
     )
 
     /** Contact display name if Android resolved it, else CNAP caller-ID name. */

@@ -25,6 +25,7 @@ class NativeCallEvent {
     this.number,
     this.name,
     this.state,
+    this.connectTimeMillis,
     this.disconnectCode,
     this.disconnectLabel,
   });
@@ -34,6 +35,9 @@ class NativeCallEvent {
   final String? number;
   final String? name;
   final int? state;
+
+  /// Epoch ms the call connected (0/null until connected); drives the live in-call timer.
+  final int? connectTimeMillis;
   final int? disconnectCode;
   final String? disconnectLabel;
 
@@ -52,6 +56,7 @@ class NativeCallEvent {
       number: map['number'] as String?,
       name: map['name'] as String?,
       state: map['state'] as int?,
+      connectTimeMillis: map['connectTimeMillis'] as int?,
       disconnectCode: map['disconnectCode'] as int?,
       disconnectLabel: map['disconnectLabel'] as String?,
     );

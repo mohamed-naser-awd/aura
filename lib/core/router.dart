@@ -43,15 +43,26 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: Routes.groupDetail,
         builder: (_, state) => GroupDetailScreen(groupId: int.parse(state.pathParameters['id']!)),
       ),
-      // Bottom-nav shell hosting the primary tabs.
-      ShellRoute(
-        builder: (_, __, child) => HomeShell(child: child),
-        routes: [
-          GoRoute(path: Routes.dialer, builder: (_, __) => const DialerScreen()),
-          GoRoute(path: Routes.callLog, builder: (_, __) => const CallLogScreen()),
-          GoRoute(path: Routes.contacts, builder: (_, __) => const ContactsScreen()),
-          GoRoute(path: Routes.groups, builder: (_, __) => const GroupsScreen()),
-          GoRoute(path: Routes.settings, builder: (_, __) => const SettingsScreen()),
+      // Bottom-nav shell hosting the primary tabs. StatefulShellRoute keeps each tab's
+      // state (scroll position, loaded lists) alive in an IndexedStack so switching is instant.
+      StatefulShellRoute.indexedStack(
+        builder: (_, __, shell) => HomeShell(shell: shell),
+        branches: [
+          StatefulShellBranch(
+            routes: [GoRoute(path: Routes.dialer, builder: (_, __) => const DialerScreen())],
+          ),
+          StatefulShellBranch(
+            routes: [GoRoute(path: Routes.callLog, builder: (_, __) => const CallLogScreen())],
+          ),
+          StatefulShellBranch(
+            routes: [GoRoute(path: Routes.contacts, builder: (_, __) => const ContactsScreen())],
+          ),
+          StatefulShellBranch(
+            routes: [GoRoute(path: Routes.groups, builder: (_, __) => const GroupsScreen())],
+          ),
+          StatefulShellBranch(
+            routes: [GoRoute(path: Routes.settings, builder: (_, __) => const SettingsScreen())],
+          ),
         ],
       ),
     ],

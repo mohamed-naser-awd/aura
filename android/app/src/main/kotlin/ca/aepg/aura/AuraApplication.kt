@@ -1,6 +1,8 @@
 package ca.aepg.aura
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
 import ca.aepg.aura.bridge.AudioStateChannel
 import ca.aepg.aura.bridge.CallEventChannel
 import ca.aepg.aura.bridge.TelecomChannel
@@ -28,7 +30,9 @@ class AuraApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         engineGroup = FlutterEngineGroup(this)
-        prewarmCallEngine()
+        // Defer prewarming the (second) call engine so it doesn't block cold start of the main UI.
+        // CallActivity has a fallback that spawns the engine if a call arrives before this runs.
+        Handler(Looper.getMainLooper()).postDelayed({ prewarmCallEngine() }, 2500)
     }
 
     /** Spawn + run the minimal call UI now, register its channels, and cache it. */

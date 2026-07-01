@@ -38,6 +38,19 @@ class _ContactDetailScreenState extends ConsumerState<ContactDetailScreen> {
     _load();
   }
 
+  /// Edit the existing system contact, or create a new one seeded with this number.
+  Future<void> _editOrAdd() async {
+    if (_contact != null) {
+      await FlutterContacts.openExternalEdit(_contact!.id);
+    } else {
+      final draft = Contact()..phones = [Phone(widget.number)];
+      await FlutterContacts.openExternalInsert(draft);
+    }
+    if (!mounted) return;
+    ref.invalidate(contactsProvider);
+    await _load();
+  }
+
   Future<void> _load() async {
     Contact? c;
     if (widget.contactId != null) {
@@ -74,6 +87,13 @@ class _ContactDetailScreenState extends ConsumerState<ContactDetailScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: Text(name),
+          actions: [
+            IconButton(
+              icon: Icon(_contact != null ? Icons.edit : Icons.person_add),
+              tooltip: _contact != null ? 'Edit contact' : 'Add contact',
+              onPressed: _loaded ? _editOrAdd : null,
+            ),
+          ],
           bottom: const TabBar(tabs: [Tab(text: 'Info'), Tab(text: 'History')]),
         ),
         body: !_loaded

@@ -10,26 +10,47 @@ final audioPickerSignalProvider = StateProvider<int>((ref) => 0);
 
 /// Snapshot of one tracked call, assembled from the native event stream.
 class ActiveCall {
-  const ActiveCall({required this.callId, this.number, this.name, this.state});
+  const ActiveCall({
+    required this.callId,
+    this.number,
+    this.name,
+    this.state,
+    this.connectTimeMillis,
+  });
 
   final String callId;
   final String? number;
   final String? name;
   final int? state;
 
+  /// Epoch ms the call connected (0/null until connected).
+  final int? connectTimeMillis;
+
   bool get isRinging => state == CallState.ringing;
   bool get isActive => state == CallState.active;
+
+  /// True once the call is connected (active or on hold) and has a connect timestamp.
+  bool get isConnected =>
+      (connectTimeMillis ?? 0) > 0 &&
+      (state == CallState.active || state == CallState.holding);
+
+  /// Elapsed talk time since connect, or null if not connected yet.
+  Duration? get elapsed => isConnected
+      ? DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(connectTimeMillis!))
+      : null;
 
   /// Best label for the caller: contact/CNAP name, else the number.
   String get displayLabel => (name != null && name!.isNotEmpty)
       ? name!
       : (number != null && number!.isNotEmpty ? number! : 'Unknown');
 
-  ActiveCall copyWith({String? number, String? name, int? state}) => ActiveCall(
+  ActiveCall copyWith({String? number, String? name, int? state, int? connectTimeMillis}) =>
+      ActiveCall(
         callId: callId,
         number: number ?? this.number,
         name: name ?? this.name,
         state: state ?? this.state,
+        connectTimeMillis: connectTimeMillis ?? this.connectTimeMillis,
       );
 }
 
@@ -54,8 +75,19 @@ class ActiveCallsNotifier extends StateNotifier<Map<String, ActiveCall>> {
       case CallEventType.state:
       case CallEventType.details:
         final existing = next[e.callId] ??
-            ActiveCall(callId: e.callId, number: e.number, name: e.name, state: e.state);
-        next[e.callId] = existing.copyWith(number: e.number, name: e.name, state: e.state);
+            ActiveCall(
+              callId: e.callId,
+              number: e.number,
+              name: e.name,
+              state: e.state,
+              connectTimeMillis: e.connectTimeMillis,
+            );
+        next[e.callId] = existing.copyWith(
+          number: e.number,
+          name: e.name,
+          state: e.state,
+          connectTimeMillis: e.connectTimeMillis,
+        );
     }
     state = next;
   }

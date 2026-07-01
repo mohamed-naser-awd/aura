@@ -54,6 +54,18 @@ object CallNotification {
             .setCategory(Notification.CATEGORY_CALL)
             .setOnlyAlertOnce(true)
             .setContentIntent(openCallScreen(context, REQ_CONTENT, openAudioPicker = false))
+
+        // Live, self-ticking call timer once connected (Android updates it — no per-second reposts).
+        val connected = call.details?.connectTimeMillis ?: 0L
+        val ticking = connected > 0L &&
+            (call.state == Call.STATE_ACTIVE || call.state == Call.STATE_HOLDING)
+        if (ticking) {
+            builder.setWhen(connected).setShowWhen(true).setUsesChronometer(true)
+        } else {
+            builder.setShowWhen(false)
+        }
+
+        builder
             .addAction(
                 action(context, android.R.drawable.ic_menu_close_clear_cancel, "End",
                     broadcast(context, REQ_END, CallActionReceiver.ACTION_END)),

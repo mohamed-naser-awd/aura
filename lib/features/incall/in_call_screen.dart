@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/format.dart';
 import '../../core/providers.dart';
 import '../../data/models/audio_route.dart';
+import '../../data/models/call_event.dart';
 import '../camera/camera_capture_screen.dart';
 import 'active_calls.dart';
 
@@ -17,6 +21,29 @@ class InCallScreen extends ConsumerStatefulWidget {
 class _InCallScreenState extends ConsumerState<InCallScreen> {
   bool _showKeypad = false;
   String _dtmf = '';
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    // Refresh once a second so the live call duration ticks.
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  String _statusText(int? state) => switch (state) {
+        CallState.dialing || CallState.connecting => 'Calling…',
+        CallState.holding => 'On hold',
+        CallState.ringing => 'Incoming',
+        _ => 'On call',
+      };
 
   void _sendDtmf(String? callId, String digit) {
     if (callId != null) ref.read(telecomServiceProvider).dtmf(callId, digit);
@@ -73,6 +100,10 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
     });
     final muted = audio.muted;
     final hasName = call?.name != null && call!.name!.isNotEmpty;
+    final elapsed = call?.elapsed;
+    final status = call == null
+        ? ''
+        : (elapsed != null ? formatCallClock(elapsed) : _statusText(call.state));
 
     return Scaffold(
       body: SafeArea(
@@ -89,6 +120,7 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
                       : _CallInfo(
                           label: call?.displayLabel ?? 'Unknown',
                           number: hasName ? call.number : null,
+                          status: status,
                         ),
                 ),
                 Row(
@@ -144,8 +176,9 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
 }
 
 class _CallInfo extends StatelessWidget {
-  const _CallInfo({required this.label, this.number});
+  const _CallInfo({required this.label, required this.status, this.number});
   final String label;
+  final String status;
   final String? number;
 
   @override
@@ -162,7 +195,7 @@ class _CallInfo extends StatelessWidget {
             Text(number!, style: Theme.of(context).textTheme.bodyMedium),
           ],
           const SizedBox(height: 8),
-          const Text('On call'),
+          Text(status, style: Theme.of(context).textTheme.titleMedium),
         ],
       ),
     );
