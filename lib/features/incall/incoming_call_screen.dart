@@ -80,10 +80,7 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
                   color: Theme.of(context).colorScheme.primary,
                   onTap: call == null || number == null
                       ? null
-                      : () async {
-                          await telecom.reject(call.callId);
-                          await telecom.placeCall(number);
-                        },
+                      : () => telecom.callBack(call.callId, number),
                 ),
               ],
             ),

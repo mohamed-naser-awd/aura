@@ -38,6 +38,10 @@ class TelecomService {
   Future<void> end(String callId) =>
       _channel.invokeMethod<void>('end', {'callId': callId});
 
+  /// Reject the ringing call, then dial [number] back once the line is free (native-sequenced).
+  Future<void> callBack(String callId, String number) =>
+      _channel.invokeMethod<void>('callBack', {'callId': callId, 'number': number});
+
   Future<void> hold(String callId) =>
       _channel.invokeMethod<void>('hold', {'callId': callId});
 

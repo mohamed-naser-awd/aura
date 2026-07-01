@@ -36,6 +36,15 @@ class AuraInCallService : InCallService() {
 
     private var foregroundStarted = false
 
+    /** Number to dial once the current call fully disconnects (incoming "Call back" action). */
+    @Volatile
+    private var pendingCallbackNumber: String? = null
+
+    /** Queue a callback: dial [number] once the line is free (see [onCallRemoved]). */
+    fun scheduleCallback(number: String) {
+        pendingCallbackNumber = number
+    }
+
     override fun onCallAdded(call: Call) {
         super.onCallAdded(call)
         CallManager.onCallAdded(call)
@@ -77,9 +86,23 @@ class AuraInCallService : InCallService() {
         ringingStarted.remove(call)
         CallManager.onCallRemoved(call)
         if (CallManager.all().isEmpty()) {
-            // No calls left → drop the notification and close the (cached-engine) call window.
-            stopCallForeground()
-            CallActivity.instance?.finish()
+            val callback = pendingCallbackNumber
+            if (callback != null) {
+                // "Call back": the line is now free — dial the number (its onCallAdded repopulates
+                // the window). Guard against a failed placeCall leaving a stuck empty window.
+                pendingCallbackNumber = null
+                runCatching { SimManager(applicationContext).placeCall(callback, null) }
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    if (CallManager.all().isEmpty()) {
+                        stopCallForeground()
+                        CallActivity.instance?.finish()
+                    }
+                }, 8000)
+            } else {
+                // No calls left → drop the notification and close the (cached-engine) call window.
+                stopCallForeground()
+                CallActivity.instance?.finish()
+            }
         } else {
             updateNotification()
         }

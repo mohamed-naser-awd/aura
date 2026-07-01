@@ -93,6 +93,12 @@ object TelecomChannel {
                     RulesSnapshot.addPendingBlock(context, call.argument<String>("number")!!)
                     result.success(true)
                 }
+                "callBack" -> {
+                    // Reject the ringing call and dial the number once the line is free.
+                    AuraInCallService.instance?.scheduleCallback(call.argument<String>("number")!!)
+                    CallManager.reject(call.argument<String>("callId")!!)
+                    result.success(true)
+                }
                 "hasDndAccess" -> {
                     val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     result.success(nm.isNotificationPolicyAccessGranted)
