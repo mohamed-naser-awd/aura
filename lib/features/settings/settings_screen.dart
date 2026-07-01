@@ -13,6 +13,7 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isDefault = ref.watch(isDefaultDialerProvider).valueOrNull ?? false;
+    final dndGranted = ref.watch(_dndAccessProvider).valueOrNull ?? false;
     final settingsAsync = ref.watch(_settingsProvider);
 
     return Scaffold(
@@ -29,6 +30,20 @@ class SettingsScreen extends ConsumerWidget {
                 : () async {
                     await ref.read(telecomServiceProvider).requestDefaultDialerRole();
                     ref.invalidate(isDefaultDialerProvider);
+                  },
+          ),
+          ListTile(
+            leading: Icon(dndGranted ? Icons.check_circle : Icons.do_not_disturb_on,
+                color: dndGranted ? Colors.green : Colors.orange),
+            title: const Text('Do Not Disturb access'),
+            subtitle: Text(dndGranted
+                ? 'Granted — force-ring can break through DND'
+                : 'Not granted — needed to ring through Do Not Disturb'),
+            onTap: dndGranted
+                ? null
+                : () async {
+                    await ref.read(telecomServiceProvider).openDndAccessSettings();
+                    ref.invalidate(_dndAccessProvider);
                   },
           ),
           const Divider(),
@@ -56,6 +71,10 @@ class _SettingsState {
   final String intenseScope;
   final WhatsAppMode whatsAppMode;
 }
+
+final _dndAccessProvider = FutureProvider<bool>((ref) {
+  return ref.watch(telecomServiceProvider).hasDndAccess();
+});
 
 final _settingsProvider = FutureProvider<_SettingsState>((ref) async {
   final repo = ref.watch(settingsRepositoryProvider);

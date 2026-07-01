@@ -4,9 +4,11 @@ import android.app.NotificationManager
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
-import android.media.MediaPlayer
+import android.media.Ringtone
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
+import java.io.File
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -26,7 +28,10 @@ import ca.aepg.aura.bridge.RulesSnapshot
  */
 class RingController(private val context: Context) {
 
-    private var player: MediaPlayer? = null
+    private var ringtone: Ringtone? = null
+
+    /** Alarm-stream volume to restore after a force/intense ring (null = nothing to restore). */
+    private var savedAlarmVolume: Int? = null
 
     /** Interruption filter to restore after a DND override (null = nothing to restore). */
     private var prevInterruptionFilter: Int? = null
@@ -58,53 +63,73 @@ class RingController(private val context: Context) {
         val custom = decision?.ringtoneUri // contact/group custom ringtone (else default)
 
         when {
-            intense -> ring(streamAlarm = true, maxVolume = true, vibe = INTENSE_PATTERN, customUri = custom)
-            // Raise the alarm volume so force-ring is actually audible in silent mode.
-            forceRing && silent -> ring(streamAlarm = true, maxVolume = true, vibe = NORMAL_PATTERN, customUri = custom)
-            !silent -> ring(streamAlarm = false, maxVolume = false, vibe = NORMAL_PATTERN, customUri = custom)
+            // Force-ring / intense: make it audible even in silent/vibrate/DND (needs DND access).
+            intense -> ring(forceAudible = true, vibe = INTENSE_PATTERN, customUri = custom)
+            forceRing && silent -> ring(forceAudible = true, vibe = NORMAL_PATTERN, customUri = custom)
+            !silent -> ring(forceAudible = false, vibe = NORMAL_PATTERN, customUri = custom)
             audio.ringerMode == AudioManager.RINGER_MODE_VIBRATE -> vibrate(NORMAL_PATTERN)
             // RINGER_MODE_SILENT without force/intense: stay quiet.
         }
     }
 
-    private fun ring(streamAlarm: Boolean, maxVolume: Boolean, vibe: LongArray, customUri: String? = null) {
-        if (streamAlarm) overrideDndIfPossible()
-        val usage = if (streamAlarm) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION_RINGTONE
+    /**
+     * Plays the ringtone. When [forceAudible] (force-ring / intense) it plays on the **alarm stream**
+     * — which is audible in silent/vibrate without touching the ringer mode (so we never toggle DND)
+     * — and raises the alarm volume, restored in [stop]. It also lifts an active DND if we have
+     * access. Normal calls play on the ring stream and respect the system ringer.
+     */
+    private fun ring(forceAudible: Boolean, vibe: LongArray, customUri: String? = null) {
+        val usage = if (forceAudible) {
+            AudioAttributes.USAGE_ALARM
+        } else {
+            AudioAttributes.USAGE_NOTIFICATION_RINGTONE
+        }
+        if (forceAudible) {
+            overrideDndIfPossible()
+            runCatching {
+                if (savedAlarmVolume == null) savedAlarmVolume = audio.getStreamVolume(AudioManager.STREAM_ALARM)
+                audio.setStreamVolume(
+                    AudioManager.STREAM_ALARM,
+                    audio.getStreamMaxVolume(AudioManager.STREAM_ALARM),
+                    0,
+                )
+            }
+        }
         // Try the custom ringtone first; fall back to the system default on any failure.
         if (!startPlayer(customUri, usage)) startPlayer(null, usage)
-        if (maxVolume) {
-            val stream = if (streamAlarm) AudioManager.STREAM_ALARM else AudioManager.STREAM_RING
-            runCatching { audio.setStreamVolume(stream, audio.getStreamMaxVolume(stream), 0) }
-        }
         vibrate(vibe)
     }
 
-    /** Starts the looping player with [customUri] (content:// or file path), or the default. */
+    /**
+     * Plays [customUri] (content:// or file path), or the system default, via the [Ringtone] player
+     * — which opens system/OEM ringtone URIs reliably (unlike MediaPlayer.setDataSource, which fails
+     * with status 0x80000000 on some OEMs). Returns false on failure so the caller can fall back.
+     */
     private fun startPlayer(customUri: String?, usage: Int): Boolean {
         return try {
-            player = MediaPlayer().apply {
-                if (customUri != null && !customUri.startsWith("content://")) {
-                    setDataSource(customUri) // audio file path
-                } else {
-                    val uri = customUri?.let { android.net.Uri.parse(it) }
-                        ?: RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE)
+            val uri = when {
+                customUri == null ->
+                    RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE)
                         ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                    setDataSource(context, uri)
-                }
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(usage)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build(),
-                )
-                isLooping = true
-                prepare()
-                start()
+                customUri.startsWith("content://") -> Uri.parse(customUri)
+                else -> Uri.fromFile(File(customUri)) // audio file path
+            } ?: return false
+
+            val rt = RingtoneManager.getRingtone(context, uri) ?: return false
+            rt.audioAttributes = AudioAttributes.Builder()
+                .setUsage(usage)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                rt.isLooping = true
+                runCatching { rt.volume = 1f }
             }
+            rt.play()
+            ringtone = rt
             true
         } catch (_: Exception) {
-            player?.run { runCatching { release() } }
-            player = null
+            runCatching { ringtone?.stop() }
+            ringtone = null
             false
         }
     }
@@ -133,9 +158,14 @@ class RingController(private val context: Context) {
     }
 
     fun stop() {
-        player?.run { runCatching { stop() }; release() }
-        player = null
+        ringtone?.run { runCatching { stop() } }
+        ringtone = null
         vibrator.cancel()
+        // Restore the alarm volume we raised for a force/intense ring.
+        savedAlarmVolume?.let { v ->
+            runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, v, 0) }
+            savedAlarmVolume = null
+        }
         // Restore the user's Do-Not-Disturb state if we changed it.
         prevInterruptionFilter?.let { filter ->
             runCatching { notifications.setInterruptionFilter(filter) }

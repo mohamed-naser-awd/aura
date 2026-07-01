@@ -52,4 +52,18 @@ class TelecomService {
 
   Future<void> setAudioRoute(int route) =>
       _channel.invokeMethod<void>('setAudioRoute', {'route': route});
+
+  /// Block a number straight from the call screen (persisted natively; the main app folds it
+  /// into the drift blocklist on the next export).
+  Future<void> blockNumber(String number) =>
+      _channel.invokeMethod<void>('blockNumber', {'number': number});
+
+  /// Whether Aura has Do-Not-Disturb (notification policy) access, needed for force-ring to
+  /// break through DND.
+  Future<bool> hasDndAccess() async =>
+      await _channel.invokeMethod<bool>('hasDndAccess') ?? false;
+
+  /// Opens the system screen to grant Do-Not-Disturb access.
+  Future<void> openDndAccessSettings() =>
+      _channel.invokeMethod<void>('openDndAccessSettings');
 }

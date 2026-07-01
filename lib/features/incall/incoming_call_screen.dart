@@ -6,15 +6,38 @@ import 'active_calls.dart';
 
 /// Full-screen incoming-call UI. Presentational — lifecycle (which screen, when to close)
 /// is owned by [CallHost].
-class IncomingCallScreen extends ConsumerWidget {
+class IncomingCallScreen extends ConsumerStatefulWidget {
   const IncomingCallScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<IncomingCallScreen> createState() => _IncomingCallScreenState();
+}
+
+class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _shake;
+
+  @override
+  void initState() {
+    super.initState();
+    // Repeating shake to draw attention to the Answer button (mimics a vibrating phone).
+    _shake = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
+      ..repeat();
+  }
+
+  @override
+  void dispose() {
+    _shake.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     ref.watch(activeCallsProvider); // rebuild on call changes
     final call = ref.read(activeCallsProvider.notifier).ringing;
     final telecom = ref.read(telecomServiceProvider);
     final hasName = call?.name != null && call!.name!.isNotEmpty;
+    final number = call?.number;
 
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
@@ -35,24 +58,53 @@ class IncomingCallScreen extends ConsumerWidget {
             const SizedBox(height: 8),
             const Text('Incoming call'),
             const Spacer(),
+            // Quick actions.
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _QuickAction(
+                  icon: Icons.block,
+                  label: 'Block',
+                  color: Colors.redAccent,
+                  onTap: call == null || number == null
+                      ? null
+                      : () {
+                          telecom.reject(call.callId);
+                          telecom.blockNumber(number);
+                        },
+                ),
+                const SizedBox(width: 32),
+                _QuickAction(
+                  icon: Icons.phone_callback,
+                  label: 'Call back',
+                  color: Theme.of(context).colorScheme.primary,
+                  onTap: call == null || number == null
+                      ? null
+                      : () async {
+                          await telecom.reject(call.callId);
+                          await telecom.placeCall(number);
+                        },
+                ),
+              ],
+            ),
+            const SizedBox(height: 32),
+            // Primary answer / decline — small, icon-only.
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _RoundAction(
-                  color: Colors.red,
+                _CallIcon(
                   icon: Icons.call_end,
-                  label: 'Decline',
+                  color: Colors.red,
+                  tooltip: 'Decline',
                   onTap: call == null ? null : () => telecom.reject(call.callId),
                 ),
-                _RoundAction(
-                  color: Colors.green,
-                  icon: Icons.call,
-                  label: 'Answer',
+                _AnimatedAnswer(
+                  animation: _shake,
                   onTap: call == null ? null : () => telecom.answer(call.callId),
                 ),
               ],
             ),
-            const SizedBox(height: 48),
+            const SizedBox(height: 40),
           ],
         ),
       ),
@@ -60,31 +112,91 @@ class IncomingCallScreen extends ConsumerWidget {
   }
 }
 
-class _RoundAction extends StatelessWidget {
-  const _RoundAction({
-    required this.color,
+/// A small, background-free call action icon.
+class _CallIcon extends StatelessWidget {
+  const _CallIcon({
     required this.icon,
-    required this.label,
+    required this.color,
+    required this.tooltip,
     required this.onTap,
   });
 
+  final IconData icon;
   final Color color;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      iconSize: 44,
+      color: color,
+      onPressed: onTap,
+      icon: Icon(icon),
+    );
+  }
+}
+
+/// Green Answer icon that shakes to grab attention.
+class _AnimatedAnswer extends StatelessWidget {
+  const _AnimatedAnswer({required this.animation, required this.onTap});
+
+  final Animation<double> animation;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        // Two quick wiggles then rest each cycle.
+        final t = animation.value;
+        final wiggle = t < 0.5 ? (0.5 - (t * 4 - 1).abs() * 0.5) : 0.0;
+        final angle = wiggle * 0.5; // radians
+        final scale = 1.0 + wiggle * 0.15;
+        return Transform.rotate(
+          angle: angle,
+          child: Transform.scale(scale: scale, child: child),
+        );
+      },
+      child: _CallIcon(
+        icon: Icons.call,
+        color: Colors.green,
+        tooltip: 'Answer',
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+/// A small labelled quick action (icon + caption, no background).
+class _QuickAction extends StatelessWidget {
+  const _QuickAction({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
   final IconData icon;
   final String label;
+  final Color color;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        FloatingActionButton.large(
-          heroTag: label,
-          backgroundColor: color,
+        IconButton(
+          tooltip: label,
+          iconSize: 26,
+          color: color,
           onPressed: onTap,
-          child: Icon(icon, color: Colors.white),
+          icon: Icon(icon),
         ),
-        const SizedBox(height: 8),
-        Text(label),
+        Text(label, style: Theme.of(context).textTheme.labelSmall),
       ],
     );
   }

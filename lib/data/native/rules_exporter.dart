@@ -22,6 +22,13 @@ class RulesExporter {
   static const _engine = RulesEngine();
 
   Future<void> export() async {
+    // Fold any blocks captured natively (e.g. from the call screen, which has no DB) into the
+    // drift blocklist first, so they persist and the snapshot below includes them.
+    final pending =
+        (await _channel.invokeMethod<List<dynamic>>('takePendingBlocks'))?.cast<String>() ?? const [];
+    for (final n in pending) {
+      if (n.isNotEmpty) await _db.insertBlocked(n, DateTime.now());
+    }
     final intenseScope = await _db.setting('intenseScope') ?? 'group';
     final blocked = (await _db.blockedList()).map((b) => b.number).toList();
     final contactRingtones = {

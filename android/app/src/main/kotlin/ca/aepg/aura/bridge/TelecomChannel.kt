@@ -1,10 +1,12 @@
 package ca.aepg.aura.bridge
 
 import android.app.Activity
+import android.app.NotificationManager
 import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.provider.Settings
 import ca.aepg.aura.telecom.AuraInCallService
 import ca.aepg.aura.telecom.CallManager
 import ca.aepg.aura.telecom.SimManager
@@ -85,6 +87,21 @@ object TelecomChannel {
                 }
                 "setAudioRoute" -> {
                     AuraInCallService.instance?.applyAudioRoute(call.argument<Int>("route")!!)
+                    result.success(true)
+                }
+                "blockNumber" -> {
+                    RulesSnapshot.addPendingBlock(context, call.argument<String>("number")!!)
+                    result.success(true)
+                }
+                "hasDndAccess" -> {
+                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    result.success(nm.isNotificationPolicyAccessGranted)
+                }
+                "openDndAccessSettings" -> {
+                    context.startActivity(
+                        Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
                     result.success(true)
                 }
                 else -> result.notImplemented()

@@ -27,6 +27,8 @@ class AuraApp extends ConsumerWidget {
     ref.read(recentCallsProvider);
     ref.read(blockedNumbersProvider);
     ref.read(whatsAppInstalledProvider);
+    // Fold any blocks made from the call screen into the DB (drains native pending_blocks).
+    ref.read(rulesExporterProvider).export();
     return MaterialApp.router(
       title: 'Aura',
       debugShowCheckedModeBanner: false,

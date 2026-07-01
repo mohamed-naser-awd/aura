@@ -8,14 +8,17 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/phone_number.dart';
 import '../../core/providers.dart';
 import '../../data/db/app_database.dart';
 import '../../data/models/sim_account.dart';
 import '../common/call_button.dart';
+import '../common/contact_avatar.dart';
 import '../common/group_avatar.dart';
 import '../common/ringtone_picker.dart';
 import '../common/whatsapp_button.dart';
 import '../contacts/contact_picker_screen.dart';
+import '../contacts/contacts_screen.dart';
 
 /// Configures a single group's rules:
 ///  - #3 mute, #5 ring-when-silent, #8 intense, #9 polite-decline (+ message)
@@ -316,6 +319,7 @@ class _MembersSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final names = ref.watch(contactNamesProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -328,10 +332,17 @@ class _MembersSection extends ConsumerWidget {
           ),
         ),
         for (final m in data.members)
-          ListTile(
+          _memberTile(context, ref, m, names[PhoneNumber.suffix(m.normalizedNumber)]),
+      ],
+    );
+  }
+
+  Widget _memberTile(BuildContext context, WidgetRef ref, GroupMember m, String? name) {
+    return ListTile(
             dense: true,
-            leading: const Icon(Icons.person),
-            title: Text(m.normalizedNumber),
+            leading: ContactAvatar(number: m.normalizedNumber, name: name, radius: 16),
+            title: Text(name ?? m.normalizedNumber),
+            subtitle: name == null ? null : Text(m.normalizedNumber),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -346,8 +357,6 @@ class _MembersSection extends ConsumerWidget {
                 ),
               ],
             ),
-          ),
-      ],
     );
   }
 }

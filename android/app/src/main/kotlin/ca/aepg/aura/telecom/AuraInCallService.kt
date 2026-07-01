@@ -25,8 +25,11 @@ class AuraInCallService : InCallService() {
 
     private val ring: RingController by lazy { RingController(applicationContext) }
 
-    /** Per-call callback that stops the ring as soon as the call leaves the RINGING state. */
+    /** Per-call callback that starts/stops the ring as the call enters/leaves RINGING. */
     private val ringStoppers = ConcurrentHashMap<Call, Call.Callback>()
+
+    /** Calls we've already started ringing for (avoids double-start across state changes). */
+    private val ringingStarted = java.util.Collections.newSetFromMap(ConcurrentHashMap<Call, Boolean>())
 
     /** Per-call callback that keeps the ongoing-call notification in sync with call state. */
     private val notifCallbacks = ConcurrentHashMap<Call, Call.Callback>()
@@ -37,19 +40,16 @@ class AuraInCallService : InCallService() {
         super.onCallAdded(call)
         CallManager.onCallAdded(call)
 
-        if (call.state == Call.STATE_RINGING) {
-            // Feature #3/#5/#8: we own ringing as the default dialer. RingController decides
-            // force-ring-when-silent and intense escalation from the rules snapshot.
-            ring.startRinging(call)
-            // Stop ringing/vibration the moment the call is answered (or otherwise leaves RINGING).
-            val cb = object : Call.Callback() {
-                override fun onStateChanged(c: Call, state: Int) {
-                    if (state != Call.STATE_RINGING) ring.stop()
-                }
+        // Ring when the call is (or becomes) RINGING — some OEMs add the call *before* RINGING,
+        // so we can't rely on the state at add-time.
+        maybeStartRinging(call)
+        val cb = object : Call.Callback() {
+            override fun onStateChanged(c: Call, state: Int) {
+                if (state == Call.STATE_RINGING) maybeStartRinging(c) else ring.stop()
             }
-            ringStoppers[call] = cb
-            call.registerCallback(cb)
         }
+        ringStoppers[call] = cb
+        call.registerCallback(cb)
 
         // Keep the ongoing-call notification current as this call's state changes.
         val ncb = object : Call.Callback() {
@@ -62,11 +62,19 @@ class AuraInCallService : InCallService() {
         launchCallUi(call)
     }
 
+    /** Start ringing once per call, only while it's actually RINGING. */
+    private fun maybeStartRinging(call: Call) {
+        if (call.state != Call.STATE_RINGING) return
+        if (!ringingStarted.add(call)) return // already started for this call
+        ring.startRinging(call)
+    }
+
     override fun onCallRemoved(call: Call) {
         super.onCallRemoved(call)
         ring.stop()
         ringStoppers.remove(call)?.let { call.unregisterCallback(it) }
         notifCallbacks.remove(call)?.let { call.unregisterCallback(it) }
+        ringingStarted.remove(call)
         CallManager.onCallRemoved(call)
         if (CallManager.all().isEmpty()) {
             // No calls left → drop the notification and close the (cached-engine) call window.

@@ -3,6 +3,7 @@ package ca.aepg.aura.bridge
 import android.content.Context
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -31,6 +32,7 @@ object RulesSnapshot {
 
     private const val PREFS = "aura_rules"
     private const val KEY_JSON = "snapshot_json"
+    private const val KEY_PENDING_BLOCKS = "pending_blocks"
     private const val CHANNEL = "aura/rules"
 
     data class Decision(
@@ -54,6 +56,7 @@ object RulesSnapshot {
                         .edit().putString(KEY_JSON, json).apply()
                     result.success(true)
                 }
+                "takePendingBlocks" -> result.success(takePendingBlocks(context))
                 else -> result.notImplemented()
             }
         }
@@ -67,6 +70,41 @@ object RulesSnapshot {
 
     /** Read the snapshot wrapped for evaluation. */
     fun read(context: Context): Evaluator = Evaluator(load(context), context)
+
+    private fun digitsOnly(s: String): String = s.filter { it.isDigit() }
+
+    /**
+     * Block a number straight from the call screen (which runs the drift-less call engine).
+     * Applies immediately by appending to the live snapshot's `blocked` array, and queues it in
+     * `pending_blocks` so the main app can fold it into the drift blocklist (durability).
+     */
+    fun addPendingBlock(context: Context, number: String) {
+        val n = digitsOnly(number)
+        if (n.isEmpty()) return
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val json = runCatching { JSONObject(prefs.getString(KEY_JSON, "{}") ?: "{}") }
+            .getOrElse { JSONObject() }
+        val blocked = json.optJSONArray("blocked") ?: JSONArray().also { json.put("blocked", it) }
+        var exists = false
+        for (i in 0 until blocked.length()) {
+            if (digitsOnly(blocked.optString(i)) == n) { exists = true; break }
+        }
+        if (!exists) blocked.put(n)
+        val pending = HashSet(prefs.getStringSet(KEY_PENDING_BLOCKS, emptySet()) ?: emptySet())
+        pending.add(n)
+        prefs.edit()
+            .putString(KEY_JSON, json.toString())
+            .putStringSet(KEY_PENDING_BLOCKS, pending)
+            .apply()
+    }
+
+    /** Return and clear the numbers blocked from the call screen since the last drain. */
+    fun takePendingBlocks(context: Context): List<String> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val pending = prefs.getStringSet(KEY_PENDING_BLOCKS, emptySet()) ?: emptySet()
+        if (pending.isNotEmpty()) prefs.edit().remove(KEY_PENDING_BLOCKS).apply()
+        return pending.toList()
+    }
 
     class Evaluator(private val root: JSONObject, private val context: Context) {
 
