@@ -147,8 +147,8 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                FractionallySizedBox(
+                  widthFactor: 0.8,
                   child: _SlideToEnd(
                     onEnd: call == null ? null : () => telecom.end(call.callId),
                   ),
