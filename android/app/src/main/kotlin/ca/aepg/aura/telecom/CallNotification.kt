@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Person
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
@@ -46,10 +47,20 @@ object CallNotification {
     fun build(context: Context, callId: String, call: Call, muted: Boolean, route: Int): Notification {
         ensureChannel(context)
 
+        val endIntent = broadcast(context, REQ_END, CallActionReceiver.ACTION_END)
+        val muteAction = action(
+            context,
+            if (muted) android.R.drawable.ic_lock_silent_mode else android.R.drawable.ic_lock_silent_mode_off,
+            if (muted) "Unmute" else "Mute",
+            broadcast(context, REQ_MUTE, CallActionReceiver.ACTION_TOGGLE_MUTE),
+        )
+        val deviceAction = action(
+            context, android.R.drawable.stat_sys_speakerphone, "Device",
+            openCallScreen(context, REQ_AUDIO, openAudioPicker = true),
+        )
+
         val builder = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_call)
-            .setContentTitle(title(call))
-            .setContentText("${statusText(call.state)} · ${routeLabel(route)}")
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_CALL)
             .setOnlyAlertOnce(true)
@@ -65,23 +76,25 @@ object CallNotification {
             builder.setShowWhen(false)
         }
 
-        builder
-            .addAction(
-                action(context, android.R.drawable.ic_menu_close_clear_cancel, "End",
-                    broadcast(context, REQ_END, CallActionReceiver.ACTION_END)),
-            )
-            .addAction(
-                action(
-                    context,
-                    if (muted) android.R.drawable.ic_lock_silent_mode else android.R.drawable.ic_lock_silent_mode_off,
-                    if (muted) "Unmute" else "Mute",
-                    broadcast(context, REQ_MUTE, CallActionReceiver.ACTION_TOGGLE_MUTE),
-                ),
-            )
-            .addAction(
-                action(context, android.R.drawable.stat_sys_speakerphone, "Device",
-                    openCallScreen(context, REQ_AUDIO, openAudioPicker = true)),
-            )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // CallStyle is non-dismissible while the call is ongoing (unlike a plain FGS
+            // notification, which is user-swipeable since Android 13). Its hang-up button IS "End".
+            val person = Person.Builder().setName(title(call)).build()
+            builder
+                .setStyle(Notification.CallStyle.forOngoingCall(person, endIntent))
+                .addAction(muteAction)
+                .addAction(deviceAction)
+        } else {
+            // API 29–30: FGS notifications are already non-dismissible; use a plain layout.
+            builder
+                .setContentTitle(title(call))
+                .setContentText("${statusText(call.state)} · ${routeLabel(route)}")
+                .addAction(
+                    action(context, android.R.drawable.ic_menu_close_clear_cancel, "End", endIntent),
+                )
+                .addAction(muteAction)
+                .addAction(deviceAction)
+        }
         return builder.build()
     }
 

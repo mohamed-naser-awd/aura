@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -147,15 +149,10 @@ class _AnimatedAnswer extends StatelessWidget {
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
-        // Two quick wiggles then rest each cycle.
+        // True back-and-forth wiggle: rotate +/- for the first ~60% of each cycle, then rest.
         final t = animation.value;
-        final wiggle = t < 0.5 ? (0.5 - (t * 4 - 1).abs() * 0.5) : 0.0;
-        final angle = wiggle * 0.5; // radians
-        final scale = 1.0 + wiggle * 0.15;
-        return Transform.rotate(
-          angle: angle,
-          child: Transform.scale(scale: scale, child: child),
-        );
+        final angle = t < 0.6 ? math.sin(t / 0.6 * math.pi * 6) * 0.22 : 0.0;
+        return Transform.rotate(angle: angle, child: child);
       },
       child: _CallIcon(
         icon: Icons.call,

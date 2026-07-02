@@ -147,11 +147,11 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                FloatingActionButton.large(
-                  heroTag: 'hangup',
-                  backgroundColor: Colors.red,
-                  onPressed: call == null ? null : () => telecom.end(call.callId),
-                  child: const Icon(Icons.call_end, color: Colors.white),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: _SlideToEnd(
+                    onEnd: call == null ? null : () => telecom.end(call.callId),
+                  ),
                 ),
                 const SizedBox(height: 32),
               ],
@@ -272,6 +272,73 @@ class _Toggle extends StatelessWidget {
         const SizedBox(height: 8),
         Text(label),
       ],
+    );
+  }
+}
+
+/// Slide-to-end control for the active call: drag the red handle across to hang up.
+class _SlideToEnd extends StatefulWidget {
+  const _SlideToEnd({required this.onEnd});
+
+  /// Called when the user slides past the end threshold. Null disables the control.
+  final VoidCallback? onEnd;
+
+  @override
+  State<_SlideToEnd> createState() => _SlideToEndState();
+}
+
+class _SlideToEndState extends State<_SlideToEnd> {
+  static const double _height = 64;
+  double _dx = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onEnd != null;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxDx = constraints.maxWidth - _height;
+        final progress = maxDx > 0 ? (_dx / maxDx).clamp(0.0, 1.0) : 0.0;
+        return Container(
+          height: _height,
+          decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(_height / 2),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Opacity(
+                opacity: (1 - progress).clamp(0.0, 1.0),
+                child: const Text('Slide to end call'),
+              ),
+              Positioned(
+                left: _dx,
+                top: 0,
+                bottom: 0,
+                child: GestureDetector(
+                  onHorizontalDragUpdate: !enabled
+                      ? null
+                      : (d) => setState(() => _dx = (_dx + d.delta.dx).clamp(0.0, maxDx)),
+                  onHorizontalDragEnd: !enabled
+                      ? null
+                      : (_) {
+                          if (_dx >= maxDx * 0.75) {
+                            widget.onEnd!.call();
+                          }
+                          setState(() => _dx = 0);
+                        },
+                  child: Container(
+                    width: _height,
+                    height: _height,
+                    decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                    child: const Icon(Icons.call_end, color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
