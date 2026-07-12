@@ -2,15 +2,16 @@ import 'package:drift/drift.dart';
 
 import '../db/app_database.dart';
 
-/// Reads/writes Aura's own call history, which carries the who-ended disposition
-/// (feature #1) that the system call log does not expose.
+/// Aura's "who-ended" sidecar. The system call log is the source of truth for which calls
+/// exist; this table only carries the who-ended disposition (feature #1) that the system log
+/// does not expose, and is merged into the system rows at display time.
 class CallLogRepository {
   CallLogRepository(this._db);
 
   final AuraDatabase _db;
 
-  Stream<List<CallEvent>> watchRecent({int limit = 200}) =>
-      _db.watchRecentCalls(limit: limit);
+  /// One-shot read of the sidecar, most-recent first (for the Recents merge).
+  Future<List<CallEvent>> recent({int limit = 200}) => _db.recentCalls(limit: limit);
 
   Future<void> record({
     required String number,

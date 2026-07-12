@@ -7,8 +7,9 @@ import 'package:intl/intl.dart';
 import '../../core/format.dart';
 import '../../core/phone_number.dart';
 import '../../core/providers.dart';
-import '../../data/db/app_database.dart';
+import '../../data/models/recent_call.dart';
 import '../../data/models/sim_account.dart';
+import '../common/contact_context_menu.dart';
 import '../contacts/contact_search_delegate.dart';
 import '../contacts/contacts_screen.dart';
 import 'sim_picker_sheet.dart';
@@ -295,6 +296,15 @@ class _DialerScreenState extends ConsumerState<DialerScreen> {
                           leading: const Icon(Icons.person_outline),
                           title: Text(s.name.isEmpty ? s.number : s.name),
                           subtitle: s.name.isEmpty ? null : Text(s.number),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.more_vert),
+                            onPressed: () => showContactMenu(
+                              context,
+                              ref,
+                              number: s.number,
+                              name: s.name.isEmpty ? null : s.name,
+                            ),
+                          ),
                           onTap: () => _call(number: s.number),
                           onLongPress: () => _setNumber(s.number),
                         );
@@ -376,7 +386,7 @@ class _RecentsList extends ConsumerWidget {
       error: (_, __) => const SizedBox.shrink(),
       data: (calls) {
         final seen = <String>{};
-        final rows = <CallEvent>[];
+        final rows = <RecentCall>[];
         for (final c in calls) {
           if (seen.add(c.number)) {
             rows.add(c);
@@ -406,6 +416,10 @@ class _RecentsList extends ConsumerWidget {
               ),
               title: Text(name ?? c.number),
               subtitle: Text('${DateFormat.jm().add_MMMd().format(c.startTs)}$durationText'),
+              trailing: IconButton(
+                icon: const Icon(Icons.more_vert),
+                onPressed: () => showContactMenu(context, ref, number: c.number, name: name),
+              ),
               onTap: () => onCall(c.number),
               onLongPress: () => onFill(c.number),
             );

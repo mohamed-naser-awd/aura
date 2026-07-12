@@ -75,6 +75,12 @@ class AuraInCallService : InCallService() {
     private fun maybeStartRinging(call: Call) {
         if (call.state != Call.STATE_RINGING) return
         if (!ringingStarted.add(call)) return // already started for this call
+        // Call waiting: another call is already up → don't blast our ringtone over it; the network
+        // injects the call-waiting beep into the call audio instead.
+        val hasOngoing = CallManager.all().any { (_, c) ->
+            c !== call && (c.state == Call.STATE_ACTIVE || c.state == Call.STATE_HOLDING)
+        }
+        if (hasOngoing) return
         ring.startRinging(call)
     }
 
@@ -112,6 +118,27 @@ class AuraInCallService : InCallService() {
         super.onCallAudioStateChanged(audioState)
         ca.aepg.aura.bridge.AudioStateChannel.emit(currentAudioStateMap())
         updateNotification() // reflect mute / device label in the notification
+    }
+
+    /**
+     * The OS calls this for the default dialer when the user presses a volume/power button while
+     * a call is ringing. Silence our ring (audio + vibration) but leave the [Call] in RINGING so
+     * answer/reject still work.
+     */
+    override fun onSilenceRinger() {
+        super.onSilenceRinger()
+        ring.stop()
+    }
+
+    /**
+     * Silence the current ringtone/vibration if a call is ringing (key-event fallback for OEMs that
+     * don't route volume keys through [onSilenceRinger]). Returns true if it silenced, so callers
+     * only consume the key when something was actually ringing (never affects in-call volume).
+     */
+    fun silenceRingerIfRinging(): Boolean {
+        val ringing = CallManager.all().any { it.second.state == Call.STATE_RINGING }
+        if (ringing) ring.stop()
+        return ringing
     }
 
     /** Called by [TelecomChannel] for the in-call screen's audio controls. */

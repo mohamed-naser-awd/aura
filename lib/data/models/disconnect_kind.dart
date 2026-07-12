@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+/// Synthetic disconnect code for a call the OS blocked (CallLog.Calls.BLOCKED_TYPE). Not a real
+/// android.telecom.DisconnectCause code — those top out around 11 — so it can't collide.
+const int kBlockedDisconnectCode = 9006;
+
 /// A call-log entry's outcome, derived from direction + whether it connected + the raw
 /// disconnect code. Using `connected` avoids mislabeling an unanswered incoming call as
 /// "Error" — it's a Missed call.
@@ -19,6 +23,9 @@ CallDisposition dispositionFor({
   final kind = DisconnectKind.fromAndroidCode(disconnectCode);
   if (incoming) {
     if (connected) return const CallDisposition('Incoming', Icons.call_received, Colors.green);
+    if (kind == DisconnectKind.blocked) {
+      return const CallDisposition('Blocked', Icons.block, Colors.red);
+    }
     if (kind == DisconnectKind.rejected) {
       return const CallDisposition('Declined', Icons.do_not_disturb_on, Colors.orange);
     }
@@ -52,6 +59,9 @@ enum DisconnectKind {
   /// We rejected the incoming call.
   rejected,
 
+  /// The OS blocked the incoming call (blocklist / screening).
+  blocked,
+
   /// Remote line was busy.
   busy,
 
@@ -64,6 +74,8 @@ enum DisconnectKind {
   /// Maps an Android `DisconnectCause.getCode()` value.
   static DisconnectKind fromAndroidCode(int? code) {
     switch (code) {
+      case kBlockedDisconnectCode:
+        return DisconnectKind.blocked;
       case 2:
         return DisconnectKind.local;
       case 3:
@@ -91,6 +103,7 @@ enum DisconnectKind {
         DisconnectKind.canceled => 'Canceled',
         DisconnectKind.missed => 'Missed',
         DisconnectKind.rejected => 'Declined',
+        DisconnectKind.blocked => 'Blocked',
         DisconnectKind.busy => 'Busy',
         DisconnectKind.answeredElsewhere => 'Answered elsewhere',
         DisconnectKind.error => 'Error',
@@ -103,6 +116,7 @@ enum DisconnectKind {
         DisconnectKind.canceled => Icons.call_missed_outgoing,
         DisconnectKind.missed => Icons.call_missed,
         DisconnectKind.rejected => Icons.do_not_disturb_on,
+        DisconnectKind.blocked => Icons.block,
         DisconnectKind.busy => Icons.phone_disabled,
         DisconnectKind.answeredElsewhere => Icons.devices,
         DisconnectKind.error => Icons.error_outline,

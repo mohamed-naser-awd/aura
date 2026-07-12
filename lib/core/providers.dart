@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/db/app_database.dart';
 import '../data/models/audio_route.dart';
 import '../data/models/call_event.dart';
+import '../data/models/recent_call.dart';
 import '../data/native/audio_state_stream.dart';
 import '../data/native/call_event_stream.dart';
 import '../data/native/rules_exporter.dart';
@@ -106,9 +107,77 @@ final simAccountsProvider = FutureProvider((ref) {
 final dialerPrefillProvider = StateProvider<String?>((ref) => null);
 
 /// Recent calls (most-recent first) for the call log and the dialer's empty state.
-final recentCallsProvider = StreamProvider((ref) {
-  return ref.watch(callLogRepositoryProvider).watchRecent();
+///
+/// The Android system call log is the source of truth for which calls exist (Android maintains
+/// it even when Aura is closed, so it self-heals records missed while the app was down). On each
+/// load we also drain the native who-ended queue into the drift sidecar and merge it in, so calls
+/// Aura witnessed keep the who-ended disposition (feature #1). Calls Aura did not witness appear
+/// without it rather than being dropped. Invalidated on Recents open / app resume ("sync on
+/// launch").
+final recentCallsProvider = FutureProvider<List<RecentCall>>((ref) async {
+  final telecom = ref.watch(telecomServiceProvider);
+  final repo = ref.watch(callLogRepositoryProvider);
+
+  // 1. Drain the native who-ended queue into the sidecar. This queue is written from the
+  //    InCallService on every witnessed call, in whatever engine is alive (even with the main
+  //    Flutter engine dead), and cleared on read — so no double-recording across launches.
+  for (final e in await telecom.takeDisconnectQueue()) {
+    final cause = (e['cause'] as num?)?.toInt();
+    final connectMs = (e['connectMillis'] as num?)?.toInt() ?? 0;
+    final endMs = (e['endMillis'] as num?)?.toInt() ?? 0;
+    await repo.record(
+      number: (e['number'] as String?) ?? 'Unknown',
+      direction: (e['direction'] as String?) ?? 'incoming',
+      disconnectCode: cause == -1 ? null : cause,
+      startTs: DateTime.fromMillisecondsSinceEpoch((e['startMillis'] as num?)?.toInt() ?? 0),
+      connectedTs: connectMs > 0 ? DateTime.fromMillisecondsSinceEpoch(connectMs) : null,
+      endTs: endMs > 0 ? DateTime.fromMillisecondsSinceEpoch(endMs) : null,
+    );
+  }
+
+  // 2. System call log (base list) + sidecar (who-ended source), then merge.
+  final systemRows = await telecom.getSystemCallLog(limit: 200);
+  final sidecar = await repo.recent(limit: 400);
+  return _mergeRecents(systemRows, sidecar);
 });
+
+/// Left-joins the system-log base rows with the who-ended sidecar. Each sidecar row is consumed
+/// at most once (nearest start-time within tolerance, same direction, same trailing-digit suffix)
+/// so back-to-back calls to the same number don't share one disconnect.
+List<RecentCall> _mergeRecents(List<Map<dynamic, dynamic>> systemRows, List<CallEvent> sidecar) {
+  const tolerance = Duration(seconds: 8);
+  final pool = List<CallEvent>.from(sidecar);
+  final out = <RecentCall>[];
+  for (final row in systemRows) {
+    final call = RecentCall.fromSystemLog(row);
+    final suffix = PhoneNumber.suffix(call.number);
+    var bestIdx = -1;
+    var bestDelta = tolerance;
+    if (suffix.isNotEmpty) {
+      for (var i = 0; i < pool.length; i++) {
+        final s = pool[i];
+        if (s.direction != call.direction) continue;
+        if (PhoneNumber.suffix(s.number) != suffix) continue;
+        final delta = s.startTs.difference(call.startTs).abs();
+        if (delta <= bestDelta) {
+          bestDelta = delta;
+          bestIdx = i;
+        }
+      }
+    }
+    if (bestIdx >= 0) {
+      final s = pool.removeAt(bestIdx);
+      out.add(call.withWhoEnded(
+        connectedTs: s.connectedTs,
+        endTs: s.endTs,
+        disconnectCode: s.disconnectCode,
+      ));
+    } else {
+      out.add(call);
+    }
+  }
+  return out;
+}
 
 /// WhatsApp quick-action bridge ("aura/whatsapp").
 final whatsAppServiceProvider = Provider<WhatsAppService>((ref) => WhatsAppService());
@@ -138,4 +207,18 @@ final whatsAppRepositoryProvider = Provider<WhatsAppRepository>((ref) {
 /// Digit-normalized numbers cached (by the probe) as being on WhatsApp.
 final whatsAppCacheProvider = StreamProvider<Set<String>>((ref) {
   return ref.watch(whatsAppRepositoryProvider).watchDetected();
+});
+
+/// Trailing-digit suffixes of every number known to be on WhatsApp (synced ∪ probe cache),
+/// precomputed once. Lets per-row WhatsApp checks be an O(1) set lookup instead of scanning
+/// and re-merging the full number set on every list-row build (contacts-only mode).
+final whatsAppDetectedSuffixesProvider = Provider<Set<String>>((ref) {
+  final synced = ref.watch(whatsAppNumbersProvider).valueOrNull ?? const <String>{};
+  final cached = ref.watch(whatsAppCacheProvider).valueOrNull ?? const <String>{};
+  final out = <String>{};
+  for (final n in synced.followedBy(cached)) {
+    final s = PhoneNumber.suffix(n);
+    if (s.isNotEmpty) out.add(s);
+  }
+  return out;
 });

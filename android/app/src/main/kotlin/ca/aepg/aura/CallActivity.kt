@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import ca.aepg.aura.bridge.AudioStateChannel
 import ca.aepg.aura.bridge.CallEventChannel
 import ca.aepg.aura.bridge.TelecomChannel
@@ -48,6 +49,16 @@ class CallActivity : FlutterActivity() {
             setTurnScreenOn(true)
         }
         maybeOpenAudioPicker(intent)
+    }
+
+    /** Volume-down while ringing silences the ringtone (fallback if the OS didn't via onSilenceRinger). */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            val service = ca.aepg.aura.telecom.AuraInCallService.instance
+            if (service?.silenceRingerIfRinging() == true) return true // consume: no volume UI
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onNewIntent(intent: Intent) {

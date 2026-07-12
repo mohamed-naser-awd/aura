@@ -5,7 +5,6 @@ import 'core/providers.dart';
 import 'core/router.dart';
 import 'core/theme.dart';
 import 'features/contacts/contacts_screen.dart';
-import 'services/call_log_ingest.dart';
 import 'services/whatsapp_scan_service.dart';
 
 /// Root widget. Wires the router and theme; the actual screens live under
@@ -18,8 +17,7 @@ class AuraApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
-    // Keep call-log recording + the opt-in WhatsApp scan alive for the app lifetime.
-    ref.watch(callLogIngestProvider);
+    // Keep the opt-in WhatsApp scan alive for the app lifetime.
     ref.watch(whatsAppScanServiceProvider);
     // Warm up the heavy per-tab data in the background at launch (read, don't watch, so this
     // widget doesn't rebuild) — by the time a tab is opened its data is already cached.

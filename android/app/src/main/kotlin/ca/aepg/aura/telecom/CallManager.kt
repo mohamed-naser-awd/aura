@@ -19,6 +19,11 @@ object CallManager {
     private val calls = ConcurrentHashMap<String, Call>()
     private val callbacks = ConcurrentHashMap<String, Call.Callback>()
 
+    // Per-call start wall-clock (ms) and direction, stamped at add-time so the who-ended
+    // queue (EventLog) can be matched to the system call log even with no Flutter engine.
+    private val startTimes = ConcurrentHashMap<String, Long>()
+    private val directions = ConcurrentHashMap<String, String>()
+
     fun idFor(call: Call): String = Integer.toHexString(System.identityHashCode(call))
 
     fun get(id: String): Call? = calls[id]
@@ -41,6 +46,8 @@ object CallManager {
     fun onCallAdded(call: Call) {
         val id = idFor(call)
         calls[id] = call
+        startTimes[id] = System.currentTimeMillis()
+        directions[id] = directionOf(call)
 
         val cb = object : Call.Callback() {
             override fun onStateChanged(c: Call, state: Int) {
@@ -61,11 +68,30 @@ object CallManager {
         val id = idFor(call)
         // Feature #1 — who ended the call: read the disconnect cause at removal time.
         val cause: DisconnectCause? = call.details?.disconnectCause
-        EventLog.recordDisconnect(id, call, cause)
+        // Queue who-ended data for the Flutter sidecar (matched to the system call log later).
+        // connectTimeMillis is 0 when the call never connected (missed/rejected).
+        EventLog.recordDisconnect(
+            number = call.details?.handle?.schemeSpecificPart,
+            causeCode = cause?.code ?: -1,
+            startMillis = startTimes.remove(id) ?: System.currentTimeMillis(),
+            connectMillis = call.details?.connectTimeMillis ?: 0L,
+            endMillis = System.currentTimeMillis(),
+            direction = directions.remove(id) ?: directionOf(call),
+        )
         CallEventChannel.emitCallRemoved(id, call, cause)
 
         callbacks.remove(id)?.let { call.unregisterCallback(it) }
         calls.remove(id)
+    }
+
+    /** "incoming" | "outgoing" from the call direction (API 29+), falling back to state. */
+    private fun directionOf(call: Call): String {
+        val dir = call.details?.callDirection ?: Call.Details.DIRECTION_UNKNOWN
+        return when (dir) {
+            Call.Details.DIRECTION_INCOMING -> "incoming"
+            Call.Details.DIRECTION_OUTGOING -> "outgoing"
+            else -> if (call.state == Call.STATE_RINGING) "incoming" else "outgoing"
+        }
     }
 
     // --- Commands invoked from Flutter via TelecomChannel ---

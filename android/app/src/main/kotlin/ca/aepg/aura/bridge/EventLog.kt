@@ -1,8 +1,6 @@
 package ca.aepg.aura.bridge
 
 import android.content.Context
-import android.telecom.Call
-import android.telecom.DisconnectCause
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -12,8 +10,10 @@ import org.json.JSONObject
  *  1. Track recent incoming-call timestamps per number so [RulesSnapshot] can detect the
  *     "2 calls within 5 minutes" condition for intense mode (#8) — even when the Flutter
  *     engine is not running.
- *  2. Queue disconnect events (who-ended, #1) so the Flutter app can ingest them on next
- *     launch, in addition to the live [CallEventChannel] stream.
+ *  2. Queue disconnect events (who-ended, #1) so the Flutter app can ingest them into its
+ *     "who-ended" sidecar. This fires from the InCallService in whatever engine is alive
+ *     (including with the main Flutter engine dead), so it is the reliable who-ended source;
+ *     the drain happens on the next Recents open via [takeQueue].
  */
 object EventLog {
 
@@ -41,20 +41,53 @@ object EventLog {
         return last != 0L && (nowMs - last) <= windowMs
     }
 
-    fun recordDisconnect(callId: String, call: Call, cause: DisconnectCause?) {
+    /**
+     * Queue one witnessed call's who-ended data for the Flutter sidecar. Timestamps are
+     * epoch-ms; [connectMillis] is 0 when the call never connected (missed/rejected).
+     * [direction] is "incoming" | "outgoing".
+     */
+    fun recordDisconnect(
+        number: String?,
+        causeCode: Int,
+        startMillis: Long,
+        connectMillis: Long,
+        endMillis: Long,
+        direction: String,
+    ) {
         val ctx = appContext ?: return
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val arr = runCatching { JSONArray(prefs.getString(KEY_QUEUE, "[]") ?: "[]") }
             .getOrElse { JSONArray() }
         arr.put(
             JSONObject().apply {
-                put("callId", callId)
-                put("number", call.details?.handle?.schemeSpecificPart)
-                put("cause", cause?.code ?: -1)
-                put("label", cause?.label?.toString())
+                put("number", number)
+                put("cause", causeCode)
+                put("startMillis", startMillis)
+                put("connectMillis", connectMillis)
+                put("endMillis", endMillis)
+                put("direction", direction)
             },
         )
         prefs.edit().putString(KEY_QUEUE, arr.toString()).apply()
+    }
+
+    /** Read and clear the pending disconnect queue in one edit. Returns the queued entries. */
+    fun takeQueue(context: Context): List<Map<String, Any?>> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val arr = runCatching { JSONArray(prefs.getString(KEY_QUEUE, "[]") ?: "[]") }
+            .getOrElse { JSONArray() }
+        prefs.edit().putString(KEY_QUEUE, "[]").apply()
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            mapOf(
+                "number" to o.opt("number")?.takeIf { it != JSONObject.NULL },
+                "cause" to o.optInt("cause", -1),
+                "startMillis" to o.optLong("startMillis", 0L),
+                "connectMillis" to o.optLong("connectMillis", 0L),
+                "endMillis" to o.optLong("endMillis", 0L),
+                "direction" to o.optString("direction", "incoming"),
+            )
+        }
     }
 
     /** Set once from Application/Service so context-free callers can persist. */

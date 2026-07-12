@@ -70,4 +70,21 @@ class TelecomService {
   /// Opens the system screen to grant Do-Not-Disturb access.
   Future<void> openDndAccessSettings() =>
       _channel.invokeMethod<void>('openDndAccessSettings');
+
+  /// The device's system call log (`content://call_log`) — the single source of truth for which
+  /// calls exist. Most-recent first; each map has id/number/type/date/duration/cachedName.
+  Future<List<Map<dynamic, dynamic>>> getSystemCallLog({int limit = 200, int? sinceMillis}) async {
+    final raw = await _channel.invokeMethod<List<dynamic>>('getSystemCallLog', {
+      'limit': limit,
+      'sinceMillis': sinceMillis,
+    });
+    return (raw ?? const []).cast<Map<dynamic, dynamic>>();
+  }
+
+  /// Reads and clears the native who-ended queue (feature #1). Each map has
+  /// number/cause/startMillis/connectMillis/endMillis/direction.
+  Future<List<Map<dynamic, dynamic>>> takeDisconnectQueue() async {
+    final raw = await _channel.invokeMethod<List<dynamic>>('takeDisconnectQueue');
+    return (raw ?? const []).cast<Map<dynamic, dynamic>>();
+  }
 }

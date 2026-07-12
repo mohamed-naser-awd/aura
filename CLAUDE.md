@@ -43,6 +43,16 @@ C:\tools\flutter\bin\flutter.bat build apk --debug
 - **Native telephony (Kotlin)** under `android/app/src/main/kotlin/ca/aepg/aura/`:
   `telecom/AuraInCallService`, `telecom/AuraCallScreeningService`, `telecom/SimManager`,
   `telecom/CallManager`, `ring/RingController`, `bridge/*`, `sms/PoliteDecline`.
+- **Recents = system call log (source of truth) + who-ended sidecar.** Recents reads the Android
+  system call log (`content://call_log`, granted by the dialer role) via
+  `TelecomChannel.getSystemCallLog`; Android maintains it even when Aura is closed, so it self-heals
+  calls missed while the app was down. The drift `CallEvents` table is **only** a who-ended sidecar
+  (feature #1, which the system log doesn't store): `CallManager.onCallRemoved` queues each witnessed
+  disconnect natively (`EventLog`, fires in any engine), and `recentCallsProvider`
+  ([providers.dart](lib/core/providers.dart)) drains it into the sidecar on Recents open/resume and
+  left-joins it onto the system rows (suffix + start-time match, consume-once). **Do not re-add a
+  private call-log copy** — a call Aura didn't witness may appear without who-ended detail, and that
+  is intentional. See [recent_call.dart](lib/data/models/recent_call.dart) for the TYPE→disposition map.
 - **Decoupled rules snapshot:** the native services run with **no Flutter engine** for incoming
   calls. Flutter denormalizes groups/rules/blocklist/ringtones into JSON via
   [rules_engine.dart](lib/services/rules_engine.dart) → [rules_exporter.dart](lib/data/native/rules_exporter.dart)

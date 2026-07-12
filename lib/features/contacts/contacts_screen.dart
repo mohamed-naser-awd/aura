@@ -3,9 +3,12 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/phone_number.dart';
+import '../../core/providers.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../common/call_button.dart';
 import '../common/contact_avatar.dart';
 import '../common/whatsapp_button.dart';
@@ -45,6 +48,12 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   @override
   Widget build(BuildContext context) {
     final contactsAsync = ref.watch(contactsProvider);
+    // Watched once here (not per row) so each list row spins up zero provider subscriptions
+    // while scrolling.
+    final photos = ref.watch(contactPhotosProvider);
+    final waInstalled = ref.watch(whatsAppInstalledProvider).valueOrNull ?? false;
+    final waMode = ref.watch(whatsAppModeProvider).valueOrNull ?? WhatsAppMode.always;
+    final waSuffixes = ref.watch(whatsAppDetectedSuffixesProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Contacts'),
@@ -110,26 +119,39 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
             ),
             itemBuilder: (context, i) {
               final c = filtered[i];
-              final number = c.phones.isNotEmpty ? c.phones.first.number : '';
+              // Contacts are pre-filtered to those with a phone, so first is always present.
+              final number = c.phones.first.number;
+              final suffix = PhoneNumber.suffix(number);
+              final showWhatsApp = waInstalled &&
+                  (waMode == WhatsAppMode.always || waSuffixes.contains(suffix));
               return RepaintBoundary(
                 child: ListTile(
-                  leading: ContactAvatar(number: number, name: c.displayName),
+                  leading: ContactAvatar(
+                    number: number,
+                    name: c.displayName,
+                    photo: photos[suffix],
+                  ),
                   title: Text(c.displayName),
-                  subtitle: number.isEmpty ? null : Text(number),
+                  subtitle: Text(number),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      WhatsAppButton(number: number),
+                      if (showWhatsApp)
+                        IconButton(
+                          tooltip: 'Open in WhatsApp',
+                          icon: const FaIcon(FontAwesomeIcons.whatsapp,
+                              color: WhatsAppButton.whatsAppGreen),
+                          iconSize: 20,
+                          onPressed: () => ref.read(whatsAppServiceProvider).openChat(number),
+                        ),
                       CallButton(number: number),
                     ],
                   ),
-                  onTap: number.isEmpty
-                      ? null
-                      : () => Navigator.of(context, rootNavigator: true).push(
-                            MaterialPageRoute(
-                              builder: (_) => ContactDetailScreen(number: number, contactId: c.id),
-                            ),
-                          ),
+                  onTap: () => Navigator.of(context, rootNavigator: true).push(
+                    MaterialPageRoute(
+                      builder: (_) => ContactDetailScreen(number: number, contactId: c.id),
+                    ),
+                  ),
                 ),
               );
             },
@@ -212,5 +234,8 @@ final contactsProvider = FutureProvider<List<Contact>>((ref) async {
   if (!await FlutterContacts.requestPermission(readonly: true)) {
     throw 'Contacts permission denied';
   }
-  return FlutterContacts.getContacts(withProperties: true, withThumbnail: true);
+  final all = await FlutterContacts.getContacts(withProperties: true, withThumbnail: true);
+  // Drop contacts with no phone number: they render as blank, non-tappable "?" rows and are
+  // useless here (nothing to call). Every consumer keys off phone suffixes, so this is safe.
+  return all.where((c) => c.phones.isNotEmpty).toList();
 });

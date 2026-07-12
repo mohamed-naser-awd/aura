@@ -63,7 +63,10 @@ class _CallHostState extends ConsumerState<CallHost> {
     if (calls.isEmpty) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    // Full-screen incoming only for the first, sole call. A second (call-waiting) incoming shows
+    // as a banner over the in-call screen instead of taking over.
     final ringing = calls.values.firstWhereOrNull((c) => c.isRinging);
-    return ringing != null ? const IncomingCallScreen() : const InCallScreen();
+    final firstIncoming = ringing != null && calls.length == 1;
+    return firstIncoming ? const IncomingCallScreen() : const InCallScreen();
   }
 }

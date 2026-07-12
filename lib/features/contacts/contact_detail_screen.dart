@@ -12,7 +12,9 @@ import '../../data/db/app_database.dart';
 import '../../data/models/disconnect_kind.dart';
 import '../common/call_button.dart';
 import '../common/contact_avatar.dart';
+import '../common/contact_context_menu.dart';
 import '../common/ringtone_picker.dart';
+import '../common/share_contact.dart';
 import '../common/whatsapp_button.dart';
 import 'contacts_screen.dart';
 
@@ -89,6 +91,14 @@ class _ContactDetailScreenState extends ConsumerState<ContactDetailScreen> {
           title: Text(name),
           actions: [
             IconButton(
+              icon: const Icon(Icons.share),
+              tooltip: 'Share contact',
+              onPressed: _loaded
+                  ? () => shareContact(context, ref,
+                      number: widget.number, name: _contact?.displayName, contact: _contact)
+                  : null,
+            ),
+            IconButton(
               icon: Icon(_contact != null ? Icons.edit : Icons.person_add),
               tooltip: _contact != null ? 'Edit contact' : 'Add contact',
               onPressed: _loaded ? _editOrAdd : null,
@@ -131,6 +141,8 @@ class _InfoTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ringtone = ref.watch(contactRingtoneProvider(number)).valueOrNull;
     final groups = ref.watch(groupsForNumberProvider(number)).valueOrNull ?? const <Group>[];
+    final blocked = ref.watch(blockedNumbersProvider).valueOrNull ?? const <String>{};
+    final isBlocked = blocked.any((b) => PhoneNumber.suffix(b) == PhoneNumber.suffix(number));
 
     return ListView(
       children: [
@@ -171,6 +183,20 @@ class _InfoTab extends ConsumerWidget {
           leading: const Icon(Icons.groups),
           title: const Text('Groups'),
           subtitle: Text(groups.isEmpty ? 'None' : groups.map((g) => g.name).join(', ')),
+        ),
+        const Divider(),
+        ListTile(
+          leading: Icon(isBlocked ? Icons.check_circle_outline : Icons.block,
+              color: isBlocked ? null : Colors.red),
+          title: Text(isBlocked ? 'Unblock' : 'Block',
+              style: TextStyle(color: isBlocked ? null : Colors.red)),
+          onTap: () {
+            if (isBlocked) {
+              ref.read(blocklistRepositoryProvider).unblock(number);
+            } else {
+              confirmAndBlock(context, ref, number: number, name: name);
+            }
+          },
         ),
       ],
     );

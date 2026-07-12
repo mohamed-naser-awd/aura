@@ -30,12 +30,10 @@ class WhatsAppButton extends ConsumerWidget {
 
     final mode = ref.watch(whatsAppModeProvider).valueOrNull ?? WhatsAppMode.always;
     if (mode == WhatsAppMode.contactsOnly) {
-      // Detected = WhatsApp-synced contacts ∪ numbers confirmed by the opt-in probe cache.
-      final synced = ref.watch(whatsAppNumbersProvider).valueOrNull ?? const <String>{};
-      final cached = ref.watch(whatsAppCacheProvider).valueOrNull ?? const <String>{};
-      final detected = {...synced, ...cached};
-      final isWhatsApp = detected.any((n) => PhoneNumber.looseMatch(n, number));
-      if (!isWhatsApp) return const SizedBox.shrink();
+      // Detected = WhatsApp-synced contacts ∪ numbers confirmed by the opt-in probe cache,
+      // pre-reduced to trailing-digit suffixes so this is an O(1) lookup per row.
+      final detected = ref.watch(whatsAppDetectedSuffixesProvider);
+      if (!detected.contains(PhoneNumber.suffix(number))) return const SizedBox.shrink();
     }
 
     return IconButton(

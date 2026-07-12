@@ -28,6 +28,8 @@ class ActiveCall {
 
   bool get isRinging => state == CallState.ringing;
   bool get isActive => state == CallState.active;
+  bool get isHolding => state == CallState.holding;
+  bool get isDialing => state == CallState.dialing || state == CallState.connecting;
 
   /// True once the call is connected (active or on hold) and has a connect timestamp.
   bool get isConnected =>
@@ -97,6 +99,22 @@ class ActiveCallsNotifier extends StateNotifier<Map<String, ActiveCall>> {
 
   ActiveCall? get foreground =>
       state.values.where((c) => c.isActive).firstOrNull ?? state.values.firstOrNull;
+
+  /// The call the user is currently talking on (or dialing out).
+  ActiveCall? get activeCall =>
+      state.values.where((c) => c.isActive).firstOrNull ??
+      state.values.where((c) => c.isDialing).firstOrNull;
+
+  /// A call parked on hold, if any.
+  ActiveCall? get heldCall => state.values.where((c) => c.isHolding).firstOrNull;
+
+  /// A ringing call while another call is already connected — i.e. call waiting.
+  ActiveCall? get waitingCall {
+    final r = ringing;
+    if (r == null) return null;
+    final hasOther = state.values.any((c) => c.callId != r.callId && (c.isActive || c.isHolding || c.isDialing));
+    return hasOther ? r : null;
+  }
 }
 
 final activeCallsProvider =

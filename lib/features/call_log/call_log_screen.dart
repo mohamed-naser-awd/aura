@@ -1,27 +1,48 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_contacts/flutter_contacts.dart' hide Group;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/format.dart';
 import '../../core/phone_number.dart';
 import '../../core/providers.dart';
-import '../../core/router.dart';
-import '../../data/db/app_database.dart';
 import '../../data/models/disconnect_kind.dart';
-import '../../data/models/sim_account.dart';
-import '../contacts/contact_detail_screen.dart';
+import '../../data/models/recent_call.dart';
+import '../common/contact_context_menu.dart';
 import '../contacts/contacts_screen.dart';
 
-/// Recent calls — sectioned by day, with a per-entry context menu and details.
-class CallLogScreen extends ConsumerWidget {
+/// Recent calls — sectioned by day, with a per-entry context menu and details. Reads the system
+/// call log (source of truth) merged with the who-ended sidecar via [recentCallsProvider], and
+/// re-syncs on open + app resume so records missed while the app was closed self-heal.
+class CallLogScreen extends ConsumerStatefulWidget {
   const CallLogScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final callsAsync = ref.watch(_recentCallsProvider);
+  ConsumerState<CallLogScreen> createState() => _CallLogScreenState();
+}
+
+class _CallLogScreenState extends ConsumerState<CallLogScreen> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Sync on open (the widget is built with warm cached data; force a fresh pull).
+    WidgetsBinding.instance.addPostFrameCallback((_) => ref.invalidate(recentCallsProvider));
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) ref.invalidate(recentCallsProvider);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final callsAsync = ref.watch(recentCallsProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Recents')),
       body: callsAsync.when(
@@ -45,7 +66,7 @@ class CallLogScreen extends ConsumerWidget {
             itemBuilder: (context, i) {
               final item = items[i];
               if (item is String) return _SectionHeader(item);
-              return _CallTile(call: item as CallEvent);
+              return _CallTile(call: item as RecentCall);
             },
           );
         },
@@ -53,10 +74,6 @@ class CallLogScreen extends ConsumerWidget {
     );
   }
 }
-
-final _recentCallsProvider = StreamProvider<List<CallEvent>>((ref) {
-  return ref.watch(callLogRepositoryProvider).watchRecent();
-});
 
 String _sectionLabel(DateTime d) {
   final now = DateTime.now();
@@ -89,7 +106,7 @@ class _SectionHeader extends StatelessWidget {
 
 class _CallTile extends ConsumerWidget {
   const _CallTile({required this.call});
-  final CallEvent call;
+  final RecentCall call;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -124,16 +141,8 @@ class _CallTile extends ConsumerWidget {
   }
 }
 
-Future<void> _placeCall(WidgetRef ref, String number) async {
-  final settings = ref.read(settingsRepositoryProvider);
-  final simId =
-      (await settings.simMode()) == SimSelectionMode.fixed ? await settings.defaultSimId() : null;
-  await ref.read(telecomServiceProvider).placeCall(number, phoneAccountId: simId);
-}
-
-void _showCallMenu(BuildContext context, WidgetRef ref, CallEvent call, String? name) {
+void _showCallMenu(BuildContext context, WidgetRef ref, RecentCall call, String? name) {
   final number = call.number;
-  final waInstalled = ref.read(whatsAppInstalledProvider).valueOrNull ?? false;
   final disp = dispositionFor(
     direction: call.direction,
     connected: call.connectedTs != null,
@@ -145,101 +154,25 @@ void _showCallMenu(BuildContext context, WidgetRef ref, CallEvent call, String? 
     end: call.endTs,
   );
   final status = timing.isEmpty ? disp.label : '${disp.label} · $timing';
-  final blocked = ref.read(blockedNumbersProvider).valueOrNull ?? const <String>{};
-  final isBlocked = blocked.any((b) => PhoneNumber.suffix(b) == PhoneNumber.suffix(number));
 
-  showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    builder: (sheet) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: CircleAvatar(child: Icon(disp.icon, color: disp.color)),
-            title: Text(name ?? number, style: Theme.of(sheet).textTheme.titleMedium),
-            // Call status + rang/talk shown here too, not only in Details.
-            subtitle: Text(name != null ? '$number\n$status' : status),
-            isThreeLine: name != null,
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.call, color: Colors.green),
-            title: const Text('Call'),
-            onTap: () {
-              Navigator.pop(sheet);
-              _placeCall(ref, number);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.dialpad),
-            title: const Text('Edit before call'),
-            onTap: () {
-              Navigator.pop(sheet);
-              ref.read(dialerPrefillProvider.notifier).state = number;
-              context.go(Routes.dialer);
-            },
-          ),
-          if (waInstalled)
-            ListTile(
-              leading: const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366)),
-              title: const Text('WhatsApp'),
-              onTap: () {
-                Navigator.pop(sheet);
-                ref.read(whatsAppServiceProvider).openChat(number);
-              },
-            ),
-          ListTile(
-            leading: const Icon(Icons.person),
-            title: const Text('View contact'),
-            onTap: () {
-              Navigator.pop(sheet);
-              Navigator.of(context, rootNavigator: true).push(
-                MaterialPageRoute(builder: (_) => ContactDetailScreen(number: number)),
-              );
-            },
-          ),
-          if (name == null)
-            ListTile(
-              leading: const Icon(Icons.person_add),
-              title: const Text('Add to contacts'),
-              onTap: () async {
-                Navigator.pop(sheet);
-                await FlutterContacts.openExternalInsert(Contact()..phones = [Phone(number)]);
-                ref.invalidate(contactsProvider);
-              },
-            ),
-          ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: const Text('Details'),
-            onTap: () {
-              Navigator.pop(sheet);
-              showDialog<void>(
-                context: context,
-                builder: (_) => _CallDetailsDialog(call: call, name: name),
-              );
-            },
-          ),
-          ListTile(
-            leading: Icon(isBlocked ? Icons.check_circle_outline : Icons.block,
-                color: isBlocked ? null : Colors.red),
-            title: Text(isBlocked ? 'Unblock' : 'Block',
-                style: TextStyle(color: isBlocked ? null : Colors.red)),
-            onTap: () {
-              Navigator.pop(sheet);
-              final repo = ref.read(blocklistRepositoryProvider);
-              isBlocked ? repo.unblock(number) : repo.block(number);
-            },
-          ),
-        ],
-      ),
+  showContactMenu(
+    context,
+    ref,
+    number: number,
+    name: name,
+    headerIcon: disp.icon,
+    headerIconColor: disp.color,
+    statusText: status,
+    onDetails: () => showDialog<void>(
+      context: context,
+      builder: (_) => _CallDetailsDialog(call: call, name: name),
     ),
   );
 }
 
 class _CallDetailsDialog extends StatelessWidget {
   const _CallDetailsDialog({required this.call, this.name});
-  final CallEvent call;
+  final RecentCall call;
   final String? name;
 
   @override

@@ -90,7 +90,11 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
   @override
   Widget build(BuildContext context) {
     ref.watch(activeCallsProvider);
-    final call = ref.read(activeCallsProvider.notifier).foreground;
+    final notifier = ref.read(activeCallsProvider.notifier);
+    final active = notifier.activeCall;
+    final held = notifier.heldCall;
+    final waiting = notifier.waitingCall;
+    final call = active ?? held ?? notifier.foreground; // the primary call shown
     final telecom = ref.read(telecomServiceProvider);
     final audio = ref.watch(audioStateProvider).valueOrNull ?? AudioRouteState.empty;
     // The ongoing-call notification's "change device" action signals us to open the picker.
@@ -103,7 +107,11 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
     final elapsed = call?.elapsed;
     final status = call == null
         ? ''
-        : (elapsed != null ? formatCallClock(elapsed) : _statusText(call.state));
+        : (call.isHolding
+            ? 'On hold'
+            : (elapsed != null ? formatCallClock(elapsed) : _statusText(call.state)));
+    final onHold = active == null && held != null; // single call, parked on hold
+    final endTarget = active ?? call;
 
     return Scaffold(
       body: SafeArea(
@@ -111,18 +119,35 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
           children: [
             Column(
               children: [
+                // Call-waiting: a second incoming call over the ongoing one.
+                if (waiting != null)
+                  _WaitingBanner(
+                    label: waiting.displayLabel,
+                    onAnswer: () => telecom.answer(waiting.callId),
+                    onDecline: () => telecom.reject(waiting.callId),
+                  ),
+                // The other party parked on hold — tap / Swap to switch.
+                if (held != null && active != null)
+                  _HeldStrip(
+                    label: held.displayLabel,
+                    onSwap: () => telecom.unhold(held.callId),
+                  ),
                 Expanded(
-                  child: _showKeypad
-                      ? _DtmfPad(
-                          digits: _dtmf,
-                          onKey: (d) => _sendDtmf(call?.callId, d),
-                        )
-                      : _CallInfo(
-                          label: call?.displayLabel ?? 'Unknown',
-                          number: hasName ? call.number : null,
-                          status: status,
-                        ),
+                  child: _CallInfo(
+                    label: call?.displayLabel ?? 'Unknown',
+                    number: hasName ? call.number : null,
+                    status: status,
+                  ),
                 ),
+                // Dialpad slides in just above the controls (caller info stays at top).
+                if (_showKeypad)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _DtmfPad(
+                      digits: _dtmf,
+                      onKey: (d) => _sendDtmf(active?.callId ?? call?.callId, d),
+                    ),
+                  ),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -131,6 +156,18 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
                       label: 'Mute',
                       active: muted,
                       onTap: () => telecom.setMuted(!muted),
+                    ),
+                    _Toggle(
+                      icon: onHold ? Icons.play_arrow : Icons.pause,
+                      label: 'Hold',
+                      active: onHold,
+                      onTap: () {
+                        if (active != null) {
+                          telecom.hold(active.callId);
+                        } else if (held != null) {
+                          telecom.unhold(held.callId);
+                        }
+                      },
                     ),
                     _Toggle(
                       icon: _showKeypad ? Icons.dialpad_outlined : Icons.dialpad,
@@ -150,7 +187,7 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
                 FractionallySizedBox(
                   widthFactor: 0.8,
                   child: _SlideToEnd(
-                    onEnd: call == null ? null : () => telecom.end(call.callId),
+                    onEnd: endTarget == null ? null : () => telecom.end(endTarget.callId),
                   ),
                 ),
                 const SizedBox(height: 32),
@@ -213,29 +250,28 @@ class _DtmfPad extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        const SizedBox(height: 8),
         SizedBox(
           height: 40,
           child: Text(digits, style: Theme.of(context).textTheme.headlineSmall),
         ),
-        Expanded(
-          child: GridView.count(
-            crossAxisCount: 3,
-            childAspectRatio: 1.8,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            children: [
-              for (final k in _keys)
-                InkWell(
-                  borderRadius: BorderRadius.circular(40),
-                  onTap: () => onKey(k),
-                  child: Center(
-                    child: Text(k, style: Theme.of(context).textTheme.headlineMedium),
-                  ),
+        GridView.count(
+          crossAxisCount: 3,
+          childAspectRatio: 2.2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 40),
+          children: [
+            for (final k in _keys)
+              InkWell(
+                borderRadius: BorderRadius.circular(40),
+                onTap: () => onKey(k),
+                child: Center(
+                  child: Text(k, style: Theme.of(context).textTheme.headlineMedium),
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ],
     );
@@ -272,6 +308,82 @@ class _Toggle extends StatelessWidget {
         const SizedBox(height: 8),
         Text(label),
       ],
+    );
+  }
+}
+
+/// A call parked on hold, shown above the active call. Tap or "Swap" to switch to it.
+class _HeldStrip extends StatelessWidget {
+  const _HeldStrip({required this.label, required this.onSwap});
+  final String label;
+  final VoidCallback onSwap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          leading: const Icon(Icons.pause_circle_outline),
+          title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: const Text('On hold'),
+          trailing: TextButton.icon(
+            onPressed: onSwap,
+            icon: const Icon(Icons.swap_calls),
+            label: const Text('Swap'),
+          ),
+          onTap: onSwap,
+        ),
+      ),
+    );
+  }
+}
+
+/// Call-waiting banner: a second incoming call over the ongoing one (Answer / Decline).
+class _WaitingBanner extends StatelessWidget {
+  const _WaitingBanner({required this.label, required this.onAnswer, required this.onDecline});
+  final String label;
+  final VoidCallback onAnswer;
+  final VoidCallback onDecline;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const Text('Incoming call'),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: onDecline,
+              tooltip: 'Decline',
+              icon: const Icon(Icons.call_end, color: Colors.red),
+            ),
+            IconButton(
+              onPressed: onAnswer,
+              tooltip: 'Answer',
+              icon: const Icon(Icons.call, color: Colors.green),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

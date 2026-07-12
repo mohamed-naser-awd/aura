@@ -195,13 +195,15 @@ class AuraDatabase extends _$AuraDatabase {
   Future<int> removeRule(int id) => (delete(rules)..where((r) => r.id.equals(id))).go();
   Future<List<Rule>> allRules() => select(rules).get();
 
-  // --- Call events ---
-  Stream<List<CallEvent>> watchRecentCalls({int limit = 200}) =>
+  // --- Call events (who-ended sidecar for the system call log) ---
+  Future<int> insertCallEvent(CallEventsCompanion c) => into(callEvents).insert(c);
+
+  /// One-shot read of the who-ended sidecar (used to enrich the system call log in Recents).
+  Future<List<CallEvent>> recentCalls({int limit = 200}) =>
       (select(callEvents)
             ..orderBy([(c) => OrderingTerm.desc(c.startTs)])
             ..limit(limit))
-          .watch();
-  Future<int> insertCallEvent(CallEventsCompanion c) => into(callEvents).insert(c);
+          .get();
 
   /// Distinct numbers seen in the call log (candidates for the WhatsApp probe).
   Future<List<String>> recentNumbers({int limit = 300}) async {
